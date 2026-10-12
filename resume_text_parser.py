@@ -5,6 +5,7 @@ import json
 from pydantic import BaseModel, Field
 from ollama import chat
 from resume_to_text import extract_text
+from pathlib import Path
 
 # 1. Define the output structure
 class ResumeData(BaseModel):
@@ -29,6 +30,11 @@ class ResumeData(BaseModel):
     skills: list[str] = Field(
         description="Skills copied verbatim"
     )
+
+# Define the directory path
+dir_path = Path("outputs")
+# Create the directory (and any missing parent folders) safely
+dir_path.mkdir(parents=True, exist_ok=True)
 
 
 # 2. Your input resume string
