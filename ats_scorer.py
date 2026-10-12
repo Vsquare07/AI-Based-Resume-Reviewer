@@ -166,24 +166,13 @@ def calculate_ats_score(resume_text, extracted_data):
 
 
 # Extract the resume text
-resume_text = extract_text("sample2.pdf")
+if(__name__=="__main__"):
+    with open("outputs/raw_resume_text.txt", "r", encoding="utf-8") as file:
+        resume_text = file.read()
 
-with open("parsed_resume.json", "r", encoding="utf-8") as file:
-    data = json.load(file)
+    with open("outputs/parsed_resume.json", "r", encoding="utf-8") as file:
+        data = json.load(file)
 
-report = calculate_ats_score(resume_text, data)
-
-print(
-    f"ATS Friendliness Score: "
-    f"{report['ats_friendliness_score']}/100"
-)
-
-for item in report["breakdown"]:
-    status = "PASS" if item["passed"] else "FAIL"
-
-    print(
-        f"{status}: {item['check']} "
-        f"({item['points_awarded']}/{item['max_points']})"
-    )
-
-print(json.dumps(report, indent=2, ensure_ascii=False))
+    report = calculate_ats_score(resume_text, data)
+    with open("outputs/ats_score.json", "w", encoding="utf-8") as file:
+        json.dump(report, file, indent=2, ensure_ascii=False)

@@ -8,7 +8,7 @@ wheels/
 
 # Virtual environments
 .venv
-parsed_resume.json
+outputs
 rag_db
 cleaned_dataset.csv
 sample.pdf

@@ -12,12 +12,9 @@ from compare_resumes import (bullet_items, clean_text, compare, detect, evidence
                              load_db, retrieve, split_sections)
 
 RAG_DIR = "rag_db"
-RESUME_PATH = "parsed_resume.json"   # parsed sections as JSON ({"skills": [...], "projects": [...], ...}) or a .txt file
-ROLE = "AI Engineer"
 K = 10                # similar resumes to compare with
 MIN_SHARE = 0.4       # a skill counts if at least this share of the similar resumes have it
 RELEVANT_MIN = 2      # a project using >= 2 of the role's core skills is relevant, 1 is partly relevant
-
 
 def read_resume(path):
     text = Path(path).read_text()
@@ -104,4 +101,7 @@ def format_result(r):
 
 
 if __name__ == "__main__":
-    print(format_result(match_skills(read_resume(RESUME_PATH), ROLE, load_db(RAG_DIR))))
+    RESUME_PATH = "outputs/parsed_resume.json"   # parsed sections as JSON ({"skills": [...], "projects": [...], ...}) or a .txt file
+    ROLE = "AI Engineer"
+    with open("outputs/retrieve_match_skills.json", "w", encoding="utf-8") as file:
+        json.dump(match_skills(read_resume(RESUME_PATH), ROLE, load_db(RAG_DIR)), file, indent=2, ensure_ascii=False)

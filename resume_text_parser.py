@@ -33,6 +33,8 @@ class ResumeData(BaseModel):
 
 # 2. Your input resume string
 resume_text = extract_text("sample.pdf")
+with open("outputs/raw_resume_text.txt", "w", encoding="utf-8") as file:
+    file.write(resume_text)
 
 # 3. Get the JSON schema
 schema = ResumeData.model_json_schema()
@@ -92,5 +94,5 @@ if not raw.strip():
 
 result = ResumeData.model_validate_json(raw)
 data = result.model_dump()
-with open("parsed_resume.json", "w", encoding="utf-8") as file:
+with open("outputs/parsed_resume.json", "w", encoding="utf-8") as file:
     json.dump(data, file, indent=2, ensure_ascii=False)
