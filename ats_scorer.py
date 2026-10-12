@@ -1,6 +1,6 @@
 import re
 import json
-from text_extractor import extract_text
+from resume_to_text import extract_text
 
 
 def contains_keyword(text, keywords):

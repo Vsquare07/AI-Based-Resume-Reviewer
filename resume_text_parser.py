@@ -1,8 +1,10 @@
+#need to run ollama serve first
+
+
 import json
 from pydantic import BaseModel, Field
 from ollama import chat
-from text_extractor import extract_text
-
+from resume_to_text import extract_text
 
 # 1. Define the output structure
 class ResumeData(BaseModel):
@@ -30,7 +32,7 @@ class ResumeData(BaseModel):
 
 
 # 2. Your input resume string
-resume_text = extract_text("sample2.pdf")
+resume_text = extract_text("sample.pdf")
 
 # 3. Get the JSON schema
 schema = ResumeData.model_json_schema()
@@ -91,4 +93,4 @@ if not raw.strip():
 result = ResumeData.model_validate_json(raw)
 data = result.model_dump()
 with open("parsed_resume.json", "w", encoding="utf-8") as file:
-    json.dump(result, file, indent=2, ensure_ascii=False)
+    json.dump(data, file, indent=2, ensure_ascii=False)

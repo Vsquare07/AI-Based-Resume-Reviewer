@@ -75,4 +75,4 @@ def extract_text(file_path):
     return "\n".join(pages)
 
 if(__name__=="__main__"):
-    print(extract_text("sample2.pdf"))
+    print(extract_text("sample.pdf"))
