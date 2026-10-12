@@ -1,0 +1,15 @@
+[project]
+name = "ai-resume-reviewer"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "faiss-cpu>=1.15.1",
+    "ollama>=0.6.3",
+    "openai>=3.28.0",
+    "pandas>=3.0.6",
+    "pymupdf>=1.28.2",
+    "sentence-transformers>=6.1.0",
+    "text-extractor>=0.0.2",
+]
