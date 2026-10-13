@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import argparse
 import base64
 import json
 import os
 import re
 import secrets
-import sys
 import time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
@@ -15,10 +13,11 @@ import requests
 
 API = "https://api.github.com"
 
+# tunables
 SEV_PENALTY_REPO = {"high": 40, "medium": 20, "low": 5, "info": 0}
 SEV_PENALTY_PROFILE = {"high": 25, "medium": 12, "low": 4, "info": 0}
 PROFILE_PENALTY_CAP = 40
-REPO_CAP_TUTORIAL = 55          # a tutorial clone cannot score above this
+REPO_CAP_TUTORIAL = 55
 
 DUMP_MAX_COMMITS = 2
 DUMP_MIN_ADDITIONS = 1500
@@ -35,10 +34,9 @@ NEW_ACCOUNT_DAYS = 30
 MOSTLY_FORKS_RATIO = 0.7
 TIMELINE_SLACK_DAYS = 180
 
-
-#Flag catalogue
-# id: (default severity, scope, how it is detected, what it means)
+# id: (default severity, scope, how it's detected, meaning). --list-checks prints this.
 FLAG_CATALOG = {
+    # profile
     "PROFILE_NOT_FOUND": ("medium", "profile", "API", "Linked GitHub profile does not exist (typo or fake link)."),
     "PROFILE_NOT_A_USER": ("low", "profile", "API", "Linked profile is an organization, not a person."),
     "NO_PUBLIC_REPOS": ("low", "profile", "API", "Profile exists but has no public repositories."),
@@ -50,7 +48,7 @@ FLAG_CATALOG = {
     "SKILL_LANGUAGE_MISMATCH": ("low", "profile", "API", "Most claimed programming languages do not appear in the analysed repos."),
     "CLAIM_NOT_FOUND": ("info", "profile", "API", "Some resume projects match no repository (could be private work)."),
     "PROMPT_INJECTION_ATTEMPT": ("high", "any", "Regex", "Text aimed at manipulating an AI scorer was found in a repo, bio, commit message or the resume."),
-
+    # repo
     "FORK_NO_CONTRIBUTION": ("high", "repo", "API", "Claimed repo is a fork and the candidate has no commits in it."),
     "LINKED_REPO_NO_CONTRIBUTION": ("high", "repo", "API", "Resume links a repo owned by someone else and the candidate has no commits in it."),
     "SINGLE_COMMIT_DUMP": ("medium", "repo", "API", "1-2 commits carrying a large codebase (bulk upload, not iterative work)."),
@@ -87,6 +85,8 @@ def _flag(fid, message, scope="repo", repo=None, evidence=None, severity=None):
     }
 
 
+# helpers
+
 def _parse_dt(s):
     if not s:
         return None
@@ -109,7 +109,7 @@ def _alnum_join(s):
 
 
 def _walk(obj, field=None):
-    """Yield (top_level_field, string) for every string inside nested lists/dicts."""
+    # yields (top level field, string) for every string in nested lists/dicts
     if isinstance(obj, str):
         yield field, obj
     elif isinstance(obj, (list, tuple, set)):
@@ -127,7 +127,7 @@ def _sanitize(text, limit):
     return text[:limit]
 
 
-# Prompt-injection scanner (README, bio, descriptions, commit messages, resume text)
+# prompt injection scan
 _INJECTION_PATTERNS = [
     r"ignore (?:all |any |the |your )?(?:previous|prior|above|earlier) (?:instructions?|prompts?|rules?)",
     r"disregard (?:all |any |the |your )?(?:previous|prior|above|earlier) (?:instructions?|prompts?|rules?)",
@@ -141,7 +141,7 @@ _INJECTION_RE = [re.compile(p, re.I) for p in _INJECTION_PATTERNS]
 
 
 def scan_injection(text):
-    """Return the matched snippet if the text tries to instruct an AI scorer, else None."""
+    """Returns the matching snippet if the text tries to instruct a scorer, else None."""
     if not text:
         return None
     for rx in _INJECTION_RE:
@@ -151,29 +151,19 @@ def scan_injection(text):
     return None
 
 
-# GitHub client (budgeted, retrying, typed errors)
+# github client
 class GitHubError(Exception):
     pass
-
-
 class NotFound(GitHubError):
     pass
-
-
 class EmptyRepo(GitHubError):
     pass
-
-
 class RateLimited(GitHubError):
     def __init__(self, msg, reset=None):
         super().__init__(msg)
         self.reset = reset
-
-
 class BudgetExceeded(GitHubError):
     pass
-
-
 class GitHubClient:
     def __init__(self, token=None, max_calls=60, timeout=10):
         self.token = token or os.environ.get("GITHUB_TOKEN")
@@ -245,7 +235,7 @@ def _last_page(headers):
 
 
 def _count(client, path, params=None):
-    """Total items of a list endpoint using per_page=1 and the Link rel=last page number."""
+    # per_page=1 and read the last page number from the Link header
     p = dict(params or {})
     p["per_page"] = 1
     data, headers = client.get(path, p)
@@ -254,7 +244,7 @@ def _count(client, path, params=None):
     return total, data
 
 
-#URL extraction from 7-field JSON
+# pulling github urls out of the resume json
 _GH_RE = re.compile(
     r"(?<![\w.-])(?:https?://)?(?:www\.)?github\.com/([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))(?:/([A-Za-z0-9._-]+))?",
     re.I)
@@ -268,7 +258,7 @@ _RESERVED = {
 
 
 def extract_github_refs(extracted_data):
-    """Find the candidate's GitHub username and any linked repositories anywhere in the JSON."""
+    """Finds the candidate's username and any linked repos anywhere in the JSON."""
     profiles, repos = [], []
     for field, text in _walk(extracted_data or {}):
         for m in _GH_RE.finditer(text):
@@ -304,7 +294,7 @@ def extract_github_refs(extracted_data):
     return {"username": username, "repos": dedup}
 
 
-# Matching resume projects <-> repositories
+# matching resume projects to repos
 _STOP = {"app", "project", "system", "using", "with", "the", "and", "for", "built", "based", "web",
          "api", "tool", "tools", "simple", "basic", "demo", "test", "code", "main", "repo", "new"}
 
@@ -317,9 +307,9 @@ def _name_tokens(name):
 
 def match_claims(projects, repo_names, linked):
     """
-    projects: list of resume project strings.  repo_names: names of known repos.
-    linked: list of (owner, name) URLs found in the resume.
-    Returns {repo_name_lower: [{"text":..., "kind": "url"|"name_strong"}]}, set(matched project idx)
+    projects: project strings from the resume. repo_names: known repo names.
+    linked: (owner, name) pairs found in the resume.
+    Returns ({repo_name_lower: [{"text", "kind": "url"|"name_strong"}]}, set of matched project idx)
     """
     out, matched = {}, set()
     for i, p in enumerate(projects):
@@ -341,14 +331,14 @@ def match_claims(projects, repo_names, linked):
     return out, matched
 
 
-# Commit-level analysis
+# commit analysis
 _GENERIC_MSG = {"update", "updates", "commit", "initial commit", "first commit", "fix", "fixes", "changes",
                 "test", "final", "done", "wip", ".", "add files", "upload files", "added files", "files",
                 "code", "update readme.md", "update readme", "create readme.md", "initial", "minor changes"}
 
 
 def _is_own(commit, ctx):
-    """Is this commit attributable to the candidate? Uses the GitHub account link, then email, then name."""
+    # account link first, then email, then name
     login = ctx["login_l"]
     a = commit.get("author") or {}
     if (a.get("login") or "").lower() == login:
@@ -390,6 +380,7 @@ def analyze_sample(sample, ctx):
         if span <= BACKDATE_WINDOW_SECONDS:
             backdated = {"commits": len(old), "recorded_within_minutes": round(span / 60)}
 
+    # sliding window over committer times to find the densest burst
     burst = None
     ts = sorted(committer_times)
     j = 0
@@ -407,7 +398,7 @@ def analyze_sample(sample, ctx):
             "backdated": backdated, "burst": burst, "generic_ratio": generic_ratio}
 
 
-# File tree analysis (engineering practices, boilerplate, hygiene)
+# file tree
 _VENDOR_SEGMENTS = {"node_modules", "venv", ".venv", "env", "vendor", "__pycache__", "dist", "build", "site-packages"}
 _CODE_EXT = {".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".kt", ".c", ".h", ".cpp", ".cc", ".hpp", ".cs", ".go",
              ".rs", ".rb", ".php", ".swift", ".scala", ".dart", ".lua", ".sol", ".v", ".sv", ".vhd", ".ipynb",
@@ -455,7 +446,7 @@ def analyze_tree(paths):
 
 
 def readme_points(text):
-    """Deterministic README score, 0-14, plus whether it is stock starter text."""
+    """README score out of 14, plus whether it's the stock starter text."""
     if not text:
         return 0, False
     stock = bool(_DEFAULT_README_RE.search(text))
@@ -481,7 +472,7 @@ def _license_holder(content):
     return holder
 
 
-# Repo analysis
+# per-repo analysis
 def analyze_repo(client, repo, ctx, claims):
     owner = (repo.get("owner") or {}).get("login") or ctx["login"]
     name = repo["name"]
@@ -544,7 +535,7 @@ def analyze_repo(client, repo, ctx, claims):
     m["sample_size"] = s["n"]
 
     first_dt = _parse_dt(((first or {}).get("commit") or {}).get("author", {}).get("date"))
-    last_dt = _parse_dt(((newest[0] if newest else {}) .get("commit") or {}).get("author", {}).get("date"))
+    last_dt = _parse_dt(((newest[0] if newest else {}).get("commit") or {}).get("author", {}).get("date"))
     m["first_commit_date"] = first_dt.isoformat() if first_dt else None
     m["last_commit_date"] = last_dt.isoformat() if last_dt else None
     m["lifespan_days"] = (last_dt - first_dt).days if first_dt and last_dt else 0
@@ -555,12 +546,12 @@ def analyze_repo(client, repo, ctx, claims):
     m["own_share"] = round(own_est / total, 2) if total else 0.0
     m["author_emails"] = sorted(s["emails"])
 
-    #tree, readme, languages, PRs, license
+    # tree, readme, languages, PRs, license
     paths = []
     tree_info = {}
     if total:
         branch = repo.get("default_branch") or "HEAD"
-        tdata = safe(lambda: client.get(f"{base}/git/trees/{branch}", {"recursive": 1})[0], {}, "file tree")
+        tdata = safe(lambda: client.get(f"/repos/{owner}/{name}/git/trees/{branch}", {"recursive": 1})[0], {}, "file tree")
         paths = [t["path"] for t in (tdata or {}).get("tree", []) if t.get("type") == "blob"]
         if (tdata or {}).get("truncated"):
             r["warnings"].append("file tree truncated (very large repo)")
@@ -597,7 +588,7 @@ def analyze_repo(client, repo, ctx, claims):
         except Exception:
             license_holder = None
 
-    #untrusted text, scanned for injection
+    # scan untrusted text for injection (one hit is enough)
     r["_untrusted"] = [("README", readme_text), ("repo description", repo.get("description") or ""),
                        ("commit messages", "\n".join(s["messages"]))] + \
                       [("resume claim", c["text"]) for c in claims]
@@ -607,7 +598,7 @@ def analyze_repo(client, repo, ctx, claims):
             add("PROMPT_INJECTION_ATTEMPT", f"Text aimed at an AI scorer found in {src}.", evidence=hit)
             break
 
-    # flags: ownership
+    # ownership flags
     if is_fork and own_est == 0:
         add("FORK_NO_CONTRIBUTION", "Claimed repo is a fork and the candidate has no commits in it.")
     elif foreign_owner and not is_fork and own_est == 0:
@@ -621,7 +612,7 @@ def analyze_repo(client, repo, ctx, claims):
     elif not is_fork and not foreign_owner and total >= 10 and 0 < own_est and m["own_share"] < LOW_SHARE:
         add("LOW_OWN_COMMIT_SHARE", f"Candidate wrote about {int(m['own_share'] * 100)}% of the commits.")
 
-    #flags: history shape (skip forks: inherited history)
+    # history shape (skipped for forks since the history is inherited)
     if not is_fork:
         if total and total <= DUMP_MAX_COMMITS and (
                 m["first_commit_additions"] >= DUMP_MIN_ADDITIONS or m["first_commit_files"] >= DUMP_MIN_FILES
@@ -646,7 +637,7 @@ def analyze_repo(client, repo, ctx, claims):
             if not generic and not related:
                 add("LICENSE_HOLDER_MISMATCH", f"LICENSE copyright holder is '{license_holder}', unrelated to the candidate.")
 
-    #flags: hygiene / boilerplate
+    # hygiene / boilerplate
     if not readme_text:
         add("NO_README", "Repository has no README.")
     rpts, stock = readme_points(readme_text)
@@ -659,7 +650,7 @@ def analyze_repo(client, repo, ctx, claims):
     if tree_info.get("env_file"):
         add("ENV_FILE_COMMITTED", "A .env file is committed (possible secrets).")
 
-    #timeline vs resume claim
+    # resume dates vs repo history
     for c in claims:
         years = [int(y) for y in re.findall(r"\b((?:19|20)\d{2})\b", c["text"])]
         if years and first_dt and not re.search(r"\b(present|current|ongoing|now|till date)\b", c["text"], re.I):
@@ -670,7 +661,7 @@ def analyze_repo(client, repo, ctx, claims):
                     evidence="Benign cause: an older project uploaded later.")
                 break
 
-    #composite: independent copy signals on the same repo
+    # several independent copy signals on one repo
     ids = {f["id"] for f in flags}
     structural, supporting = ids & STRUCTURAL, ids & SUPPORTING
     if structural and len(structural | supporting) >= 2:
@@ -680,7 +671,7 @@ def analyze_repo(client, repo, ctx, claims):
             + ", ".join(sorted(structural | supporting)) + ".",
             evidence="Advisory: ask the candidate to walk through the code.", severity=sev)
 
-    #positives
+    # positives
     if tree_info.get("ci"):
         r["positives"].append("CI workflow present")
     if tree_info.get("tests"):
@@ -695,7 +686,8 @@ def analyze_repo(client, repo, ctx, claims):
     return r
 
 
-# Quality scoring (0-100, deterministic)
+# scoring (0-100, no LLM involved except the README points)
+
 def _history_points(n):
     return 25 if n >= 50 else 20 if n >= 15 else 12 if n >= 5 else 5 if n >= 3 else 0
 
@@ -740,7 +732,8 @@ def finalize_repo(r):
     return r
 
 
-# LLM stage (bounded, evidence-checked)
+# LLM stage
+
 LLM_SCHEMA = {
     "type": "object",
     "properties": {
@@ -823,7 +816,7 @@ def parse_llm_output(raw):
 
 
 def evidence_supported(evidence, corpus):
-    """The quoted evidence must really exist in what the model was shown (kills fabricated quotes)."""
+    """Quoted evidence has to actually appear in the text the model was shown."""
     ev = _alnum_join(evidence)
     if not ev or len(evidence) > 400:
         return False
@@ -845,7 +838,7 @@ def run_llm_for_repo(r, repo_desc, llm_fn):
     prompt = build_llm_prompt(r, repo_desc, nonce)
     try:
         raw = llm_fn(prompt, LLM_SCHEMA)
-    except Exception as e:  # network down, model missing, timeout
+    except Exception as e:  # ollama down, model missing, timeout
         r["llm"] = {"used": False, "reason": f"llm call failed: {e}"}
         return
     parsed = parse_llm_output(raw)
@@ -887,7 +880,7 @@ def run_llm_for_repo(r, repo_desc, llm_fn):
 
 
 def make_ollama_llm_fn(model="qwen2.5:7b", host="http://localhost:11434", timeout=180):
-    """llm_fn(prompt, schema) -> str, using Ollama's structured outputs (temperature 0)."""
+    """Returns llm_fn(prompt, schema) -> str using ollama structured outputs at temperature 0."""
     def _fn(prompt, schema):
         resp = requests.post(f"{host}/api/chat", timeout=timeout, json={
             "model": model, "stream": False, "format": schema,
@@ -899,7 +892,8 @@ def make_ollama_llm_fn(model="qwen2.5:7b", host="http://localhost:11434", timeou
     return _fn
 
 
-# Identity and skills
+# identity and skills
+
 _LANG_ALIASES = {
     "python": "Python", "py": "Python", "javascript": "JavaScript", "js": "JavaScript", "typescript": "TypeScript",
     "ts": "TypeScript", "java": "Java", "kotlin": "Kotlin", "swift": "Swift", "rust": "Rust", "go": "Go",
@@ -933,7 +927,8 @@ def _name_matches(resume_name, profile_name, login):
     return False if profile_name else None
 
 
-# Main entry point
+# main
+
 def _select(all_repos, linked, claims_by_repo, username, max_repos):
     by_name = {r["name"].lower(): r for r in all_repos}
     specs, seen = [], set()
@@ -945,21 +940,24 @@ def _select(all_repos, linked, claims_by_repo, username, max_repos):
         seen.add(key)
         specs.append({"owner": owner, "name": name, "repo": repo, "why": why})
 
-    for o, n in linked:                                    # 1. repos the resume links
+    # 1. repos linked in the resume
+    for o, n in linked:
         add(o, n, by_name.get(n.lower()) if o.lower() == username.lower() else None, "linked in resume")
-    for lname in claims_by_repo:                           # 2. repos matching a resume project
+    # 2. repos that match a resume project
+    for lname in claims_by_repo:
         if lname in by_name:
             add(by_name[lname]["owner"]["login"], by_name[lname]["name"], by_name[lname], "matches a resume project")
+    # 3. most recently pushed originals
     originals = [r for r in all_repos if not r.get("fork") and r.get("size", 1) > 0
                  and r["name"].lower() != username.lower() and not r["name"].lower().endswith(".github.io")]
     originals.sort(key=lambda r: (r.get("pushed_at") or ""), reverse=True)
-    for r in originals:                                    # 3. most recently active originals
+    for r in originals:
         add(r["owner"]["login"], r["name"], r, "recently active original repo")
     return specs
 
 
-def analyze_github(extracted_data, resume_name=None, resume_email=None, claimed_years=None,
-                   token=None, llm_fn=None, max_repos=4, max_api_calls=None, client=None, now=None):
+def _analyze_github_full(extracted_data, resume_name=None, resume_email=None, claimed_years=None,
+                         token=None, llm_fn=None, max_repos=4, max_api_calls=None, client=None, now=None):
     now = now or datetime.now(timezone.utc)
     res = {"status": None, "username": None, "profile_url": None, "github_score": None, "risk_level": None,
            "flags": [], "verified_signals": [], "repos": [], "skills": {"confirmed": [], "unconfirmed": []},
@@ -990,7 +988,7 @@ def analyze_github(extracted_data, resume_name=None, resume_email=None, claimed_
         res["api_calls"] = getattr(client, "calls", 0)
         return _aggregate(res, pflags)
 
-    #profile
+    # profile
     try:
         profile = client.get(f"/users/{username}")[0]
     except NotFound:
@@ -1021,7 +1019,7 @@ def analyze_github(extracted_data, resume_name=None, resume_email=None, claimed_
     if bio_hit:
         padd("PROMPT_INJECTION_ATTEMPT", "Text aimed at an AI scorer found in the GitHub bio.", bio_hit)
 
-    #repo list
+    # repo list
     try:
         all_repos = client.get(f"/users/{username}/repos", {"per_page": 100, "sort": "pushed", "type": "owner"})[0]
     except (RateLimited, BudgetExceeded, GitHubError) as e:
@@ -1034,7 +1032,7 @@ def analyze_github(extracted_data, resume_name=None, resume_email=None, claimed_
     if all_repos and len(all_repos) >= 3 and sum(1 for r in all_repos if r.get("fork")) / len(all_repos) > MOSTLY_FORKS_RATIO:
         padd("MOSTLY_FORKS", "Most public repositories are forks.")
 
-    #resume claims -> repos
+    # resume projects -> repos
     projects = [t for _, t in _walk((extracted_data or {}).get("projects"))]
     repo_names = [r["name"] for r in all_repos] + [n for _, n in refs["repos"]]
     claims_by_repo, matched_idx = match_claims(projects, repo_names, refs["repos"])
@@ -1043,7 +1041,7 @@ def analyze_github(extracted_data, resume_name=None, resume_email=None, claimed_
         padd("CLAIM_NOT_FOUND", f"{len(unmatched)} resume project(s) match no repository (could be private work).",
              "; ".join(u[:60] for u in unmatched[:3]))
 
-    #context for ownership checks
+    # context used by the ownership checks
     own_names = {_norm(username), _norm(profile.get("name")), _norm(resume_name)} - {""}
     own_name_norms = set(own_names)
     for src in (profile.get("name"), resume_name):
@@ -1054,7 +1052,7 @@ def analyze_github(extracted_data, resume_name=None, resume_email=None, claimed_
            "own_emails": {e.lower() for e in (profile.get("email"), resume_email) if e},
            "own_names": own_names, "own_name_norms": own_name_norms}
 
-    #analyse repos
+    # analyse the selected repos
     specs = _select(all_repos, refs["repos"], claims_by_repo, username, max_repos)
     for spec in specs:
         repo = spec["repo"]
@@ -1076,13 +1074,13 @@ def analyze_github(extracted_data, resume_name=None, resume_email=None, claimed_
         except GitHubError as e:
             res["warnings"].append(f"{spec['owner']}/{spec['name']}: {e}")
 
-    #LLM stage (optional)
+    # optional LLM pass
     if llm_fn and res["repos"]:
         res["llm"]["used"] = True
         for r in res["repos"]:
             run_llm_for_repo(r, r["_description"], llm_fn)
 
-    #cross-repo checks
+    # checks across repos
     originals = [r for r in res["repos"] if not r["is_fork"] and r["owner"].lower() == username.lower()]
     if not originals and res["repos"] == []:
         padd("NO_ORIGINAL_REPOS", "No original repositories could be analysed.")
@@ -1127,10 +1125,9 @@ def _aggregate(res, pflags):
     for r in repos:
         flags.extend(r["flags"])
         r.pop("_readme", None)
-    # one injection finding anywhere is enough; keep every distinct (id, repo)
     res["flags"] = flags
 
-    # score
+    # overall score: weighted mean of repo scores (claimed repos count double) minus capped profile penalty
     if repos:
         w_total = sum((2 if r["claimed"] else 1) for r in repos)
         mean = sum(r["score"] * (2 if r["claimed"] else 1) for r in repos) / w_total
@@ -1150,7 +1147,8 @@ def _aggregate(res, pflags):
     else:
         res["risk_level"] = "review" if res["status"] == "not_found" else None
 
-    for r in repos:                       # strip internals from the public result
+    # drop the private keys
+    for r in repos:
         for k in [k for k in r if k.startswith("_")]:
             r.pop(k)
         for k in [k for k in r["metrics"] if k.startswith("_")]:
@@ -1158,9 +1156,80 @@ def _aggregate(res, pflags):
     return res
 
 
-# Output helpers
+# slim output (what analyze_github returns)
+# Same top-level keys as the full result, minus audit-only detail: per-repo flag copies, score components,
+# per-repo metrics, claim text, language bytes, llm internals, api_calls, profile_url, flag scope,
+# zero-penalty info flags, and generic evidence sentences.
+
+# for these, 'evidence' is just a generic advisory line; the numbers are already in 'message'
+_GENERIC_EVIDENCE = {"SINGLE_COMMIT_DUMP", "BACKDATED_COMMITS", "TIMELINE_MISMATCH", "COPIED_REPO_INDICATORS",
+                     "ACCOUNT_YOUNGER_THAN_CLAIM", "SKILL_LANGUAGE_MISMATCH"}
+
+
+def _repo_label(full, username):
+    # 'jdoe123/app' -> 'app' for the candidate's own repo, keep 'owner/app' for anyone else's
+    if not full:
+        return None
+    owner, _, name = full.partition("/")
+    return name if owner.lower() == (username or "").lower() else full
+
+
+def _compact(result, keep_info=False, include_repos=True):
+    user = result.get("username")
+    flags = []
+    for f in result.get("flags") or []:
+        if f["severity"] == "info" and not keep_info:
+            continue
+        item = {"id": f["id"], "severity": f["severity"], "message": f["message"]}
+        label = _repo_label(f.get("repo"), user)
+        if label:
+            item["repo"] = label
+        if f.get("evidence") and f["id"] not in _GENERIC_EVIDENCE:
+            item["evidence"] = f["evidence"]
+        flags.append(item)
+
+    signals = []
+    for s in result.get("verified_signals") or []:
+        label = _repo_label(s.get("repo"), user)
+        signals.append(s["message"] + (f" [{label}]" if label else ""))
+
+    repos = []
+    for r in result.get("repos") or []:
+        m = r.get("metrics") or {}
+        repos.append({"name": _repo_label(r["full_name"], user), "score": r["score"], "is_fork": r["is_fork"],
+                      "claimed": r["claimed"], "commits": m.get("total_commits", 0),
+                      "own_commits": m.get("own_commits_est", 0)})
+
+    skills = result.get("skills") or {}
+    return {
+        "status": result.get("status"),
+        "username": user,
+        "github_score": result.get("github_score"),
+        "risk_level": result.get("risk_level"),
+        "repo_count": len(repos),
+        "flags": flags,
+        "verified_signals": signals,
+        "repos": repos if include_repos else [],
+        "skills": {"confirmed": skills.get("confirmed", []), "unconfirmed": skills.get("unconfirmed", [])},
+        "warnings": result.get("warnings") or [],
+    }
+
+
+def analyze_github(extracted_data, resume_name=None, resume_email=None, claimed_years=None,
+                   token=None, llm_fn=None, max_repos=4, max_api_calls=None, client=None, now=None,
+                   keep_info=False, include_repos=True):
+    """Main entry point, returns the slim result.
+    keep_info=True keeps the zero-penalty info flags, include_repos=False drops the repo list."""
+    full = _analyze_github_full(extracted_data, resume_name=resume_name, resume_email=resume_email,
+                                claimed_years=claimed_years, token=token, llm_fn=llm_fn, max_repos=max_repos,
+                                max_api_calls=max_api_calls, client=client, now=now)
+    return _compact(full, keep_info=keep_info, include_repos=include_repos)
+
+
+# output helpers
+
 def report_lines(result):
-    """Short human-readable lines for the final report (strengths / weaknesses)."""
+    """Short lines for the final report."""
     st = result["status"]
     if st == "not_provided":
         return ["GitHub: no link provided, so no code verification was possible (not penalised)."]
@@ -1168,13 +1237,17 @@ def report_lines(result):
         return [f"GitHub: profile '{result['username']}' does not exist; confirm the link with the candidate."]
     lines = []
     if result["github_score"] is not None:
+        n_repos = result.get("repo_count", len(result["repos"]))
         lines.append(f"GitHub score {result['github_score']}/100, risk level: {result['risk_level']} "
-                     f"({len(result['repos'])} repo(s) analysed{', partial' if st == 'partial' else ''}).")
+                     f"({n_repos} repo(s) analysed{', partial' if st == 'partial' else ''}).")
     for f in sorted(result["flags"], key=lambda x: ["high", "medium", "low", "info"].index(x["severity"])):
         where = f" [{f['repo']}]" if f.get("repo") else ""
         lines.append(f"{f['severity'].upper()}: {f['message']}{where}")
     for v in result["verified_signals"]:
-        lines.append("Positive: " + v["message"] + (f" [{v['repo']}]" if v.get("repo") else ""))
+        if isinstance(v, str):
+            lines.append("Positive: " + v)
+        else:
+            lines.append("Positive: " + v["message"] + (f" [{v['repo']}]" if v.get("repo") else ""))
     return lines
 
 
@@ -1182,6 +1255,7 @@ def _print_catalog():
     print(f"{'FLAG':<30}{'SEVERITY':<10}{'SCOPE':<9}{'USES':<7}MEANING")
     for fid, (sev, scope, uses, desc) in FLAG_CATALOG.items():
         print(f"{fid:<30}{sev:<10}{scope:<9}{uses:<7}{desc}")
+
 
 
 if __name__ == "__main__":
