@@ -133,7 +133,9 @@ def load_db(rag_dir, embedder=None):
     index = faiss.read_index(str(d / "index.faiss"))
     if embedder is None:
         from sentence_transformers import SentenceTransformer
-        embedder = SentenceTransformer(EMBEDDING_MODEL)
+        import torch
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        embedder = SentenceTransformer(EMBEDDING_MODEL, device=device)
     return {"records": records, "vocab": json.load(open(d / "vocab.json")),
             "index": index, "embedder": embedder}
 

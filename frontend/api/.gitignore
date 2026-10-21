@@ -1,0 +1,33 @@
+# Python Artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Environments
+.venv/
+venv/
+env/
+
+# Testing & Linters
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local Databases & Logs
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# Environment Files
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# OS & Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

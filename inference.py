@@ -107,8 +107,10 @@ def run_inference(
         think=False,
         options={
             "temperature": 0.1,
-            "num_predict": 1000
-        }
+            "num_predict": 1000,
+            "num_gpu": 99
+        },
+        keep_alive="30m"
     )
 
     raw_content = response.message.content or ""

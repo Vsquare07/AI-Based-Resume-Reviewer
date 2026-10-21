@@ -79,8 +79,10 @@ RESUME:
         think=False,
         options={
             "temperature": 0,
-            "num_predict": 2500
-        }
+            "num_predict": 2500,
+            "num_gpu": 99
+        },
+        keep_alive="30m"
     )
 
     raw = response.message.content or ""

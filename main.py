@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 # Core pipeline modules
@@ -103,7 +104,7 @@ def run_pipeline(
 ) -> dict:
     """Executes the full AI Resume Reviewer pipeline end-to-end."""
     if pdf_path and Path(pdf_path).exists():
-        print(f"\n[0/4] Parsing resume directly from PDF: {pdf_path}...")
+        print("\n[0/4] Parsing resume...")
         parsed_data, raw_text = parse_resume(pdf_path, model=OLLAMA_MODEL)
     else:
         ensure_sample_data()
@@ -168,8 +169,29 @@ def run_pipeline(
         model_weaknesses=inference_output.get("weaknesses", [])
     )
 
+    # Extract candidate basic info
+    personal_details = parsed_data.get("personal_details", [])
+    candidate_name = "Candidate"
+    if personal_details and len(personal_details) > 0:
+        for item in personal_details:
+            cleaned = re.sub(r"[^\w\s]", "", item).strip()
+            if cleaned and not any(k in item.lower() for k in ["@", "http", "phone", "tel:", "www.", "github.com", "linkedin.com", "(+", "+"]):
+                candidate_name = cleaned
+                break
+        if candidate_name == "Candidate":
+            candidate_name = personal_details[0].strip()
+
+    candidate_info = {
+        "name": candidate_name,
+        "personal_details": personal_details,
+        "education": parsed_data.get("education", []),
+        "experience": parsed_data.get("experience", []),
+    }
+
     # Module 6: Assemble final schema matching architecture diagram
     output_json = {
+        "candidate_name": candidate_name,
+        "candidate_info": candidate_info,
         "score": final_score,
         "ats_score": ats_score,
         "matched_skills": [m["skill"] for m in matching_skills],
