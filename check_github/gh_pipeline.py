@@ -294,6 +294,7 @@ def _compact(result, keep_info=False, include_repos=True):
     return {
         "status": result.get("status"),
         "username": user,
+        "profile_url": result.get("profile_url"),
         "github_score": result.get("github_score"),
         "risk_level": result.get("risk_level"),
         "repo_count": len(repos),

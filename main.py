@@ -194,6 +194,8 @@ def run_pipeline(
         "candidate_info": candidate_info,
         "score": final_score,
         "ats_score": ats_score,
+        "github_score": github_score,
+        "github_audit": github_result,
         "matched_skills": [m["skill"] for m in matching_skills],
         "missing_skills": [m["skill"] for m in missing_skills],
         "weaknesses": weaknesses,
