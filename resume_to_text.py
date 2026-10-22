@@ -57,7 +57,8 @@ def extract_text(file_path):
             if not hits:
                 continue
             anchor = " ".join(w[4] for w in hits)
-            if anchor.lower().replace("https://", "").replace("http://", "").rstrip("/") in url.lower():
+            cleaned_anchor = anchor.lower().replace("https://", "").replace("http://", "").rstrip("/")
+            if "/" in cleaned_anchor and cleaned_anchor in url.lower():
                 continue
             last = hits[-1]
             link_after[(last[5], last[6], last[7])] = f" ({url})"
