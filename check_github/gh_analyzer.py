@@ -161,8 +161,8 @@ def analyze_repo(client, repo, ctx, claims):
     }
     flags, m = r["flags"], r["metrics"]
 
-    def add(fid, msg, evidence=None, severity=None):
-        flags.append(_flag(fid, msg, "repo", full, evidence, severity))
+    def add(fid, msg, evidence=None, severity=None, commit=None, url=None):
+        flags.append(_flag(fid, msg, "repo", full, evidence, severity, commit=commit, url=url))
 
     def safe(fn, default, label):
         try:
@@ -195,6 +195,11 @@ def analyze_repo(client, repo, ctx, claims):
     stats = (first_detail or {}).get("stats") or {}
     m["first_commit_additions"] = stats.get("additions", 0)
     m["first_commit_files"] = len((first_detail or {}).get("files") or [])
+    first_sha = (first_detail or {}).get("sha") or (first or {}).get("sha")
+    repo_url = repo.get("html_url") or f"https://github.com/{full}"
+    first_url = (first_detail or {}).get("html_url") or (first or {}).get("html_url") or (f"{repo_url}/commit/{first_sha}" if first_sha else None)
+    m["first_commit_sha"] = first_sha
+    m["first_commit_url"] = first_url
 
     own_total = 0
     if total:
@@ -283,11 +288,18 @@ def analyze_repo(client, repo, ctx, claims):
         if total and total <= DUMP_MAX_COMMITS and (
                 m["first_commit_additions"] >= DUMP_MIN_ADDITIONS or m["first_commit_files"] >= DUMP_MIN_FILES
                 or m["size_kb"] >= DUMP_MIN_SIZE_KB):
+            commit_part = f" (commit {first_sha[:7]})" if first_sha else ""
+            link_part = f": {first_url}" if first_url else "."
             add("SINGLE_COMMIT_DUMP",
-                f"{total} commit(s) carrying {m['first_commit_additions']} added lines / {m['first_commit_files']} files.",
-                evidence="Benign cause: an old project uploaded in one go. Treat as a prompt for a question, not proof.")
+                f"{total} commit(s) carrying {m['first_commit_additions']} added lines / {m['first_commit_files']} files{commit_part}{link_part}",
+                evidence="Benign cause: an old project uploaded in one go. Treat as a prompt for a question, not proof.",
+                commit=first_sha, url=first_url)
         elif total > DUMP_MAX_COMMITS and m["first_commit_additions"] >= LARGE_INITIAL_ADDITIONS:
-            add("LARGE_INITIAL_COMMIT", f"First commit adds {m['first_commit_additions']} lines (imported or scaffolded).")
+            commit_part = f" (commit {first_sha[:7]})" if first_sha else ""
+            link_part = f": {first_url}" if first_url else "."
+            add("LARGE_INITIAL_COMMIT",
+                f"First commit adds {m['first_commit_additions']} lines (imported or scaffolded){commit_part}{link_part}",
+                commit=first_sha, url=first_url)
         if s["backdated"]:
             add("BACKDATED_COMMITS",
                 f"{s['backdated']['commits']} commits were authored 90+ days before being recorded, all within "

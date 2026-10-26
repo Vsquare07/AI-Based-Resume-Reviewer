@@ -45,7 +45,9 @@ def build_context_prompt(
 
     # Format GitHub red flags (focus on high and medium severity)
     actionable_flags = [
-        f"[{f.get('severity', 'info').upper()}] {f.get('message', '')}" + (f" (repo: {f['repo']})" if f.get('repo') else "")
+        f"[{f.get('severity', 'info').upper()}] {f.get('message', '')}" + (
+            f" (repo: {f['repo']})" if f.get('repo') and f.get('repo') not in f.get('message', '') else ""
+        )
         for f in github_flags
         if f.get("severity") in ("high", "medium")
     ]
@@ -139,7 +141,7 @@ def generate_weaknesses(
     # Priority 1: High-severity GitHub flags (potential plagiarism, dummy repos, etc.)
     for flag in github_flags:
         if flag.get("severity") == "high":
-            where = f" [{flag['repo']}]" if flag.get("repo") else ""
+            where = f" [{flag['repo']}]" if flag.get("repo") and flag.get("repo") not in flag.get("message", "") else ""
             msg = f"Critical Code Concern{where}: {flag.get('message')}"
             if msg not in weaknesses:
                 weaknesses.append(msg)
@@ -158,7 +160,7 @@ def generate_weaknesses(
 
         for flag in github_flags:
             if flag.get("severity") == "medium":
-                where = f" [{flag['repo']}]" if flag.get("repo") else ""
+                where = f" [{flag['repo']}]" if flag.get("repo") and flag.get("repo") not in flag.get("message", "") else ""
                 weaknesses.append(f"Code Quality Concern{where}: {flag.get('message')}")
 
         if model_reason:

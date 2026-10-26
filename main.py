@@ -1,6 +1,9 @@
 import json
 import re
+import os
 from pathlib import Path
+from dotenv import load_dotenv
+load_dotenv()
 
 # Core pipeline modules
 from ats_scorer import calculate_ats_score
@@ -134,7 +137,8 @@ def run_pipeline(
     skill_match_score = compute_skill_match_score(all_candidate_skills, required_skills)
 
     # Module 3: GitHub Code Audit
-    github_result = analyze_github(parsed_data)
+    has_token=bool(os.environ.get("GITHUB_TOKEN"))
+    github_result = analyze_github(parsed_data, max_repos=8  if has_token else 4)
     github_score = github_result.get("github_score")
     github_flags = github_result.get("flags", [])
 
@@ -200,7 +204,11 @@ def run_pipeline(
         "missing_skills": [m["skill"] for m in missing_skills],
         "weaknesses": weaknesses,
         "github_flags": [
-            f"[{f.get('severity', '').upper()}] {f.get('message')}"
+            (
+                f"[{f.get('severity', '').upper()}] {f.get('message')}"
+                if (f.get("url") and f["url"] in f.get("message", "")) or not f.get("url")
+                else f"[{f.get('severity', '').upper()}] {f.get('message', '').rstrip('.')}: {f['url']}"
+            )
             for f in github_flags
             if f.get("severity") in ("high", "medium")
         ]

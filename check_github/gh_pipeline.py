@@ -66,8 +66,10 @@ def _select(all_repos, linked, claims_by_repo, username, max_repos):
     return specs
 
 def _analyze_github_full(extracted_data, resume_name=None, resume_email=None, claimed_years=None,
-                         token=None, llm_fn=None, max_repos=4, max_api_calls=None, client=None, now=None):
+                         token=None, llm_fn=None, max_repos=None, max_api_calls=None, client=None, now=None):
     now = now or datetime.now(timezone.utc)
+    _tok = token or os.environ.get("GITHUB_TOKEN")
+    max_repos = max_repos if max_repos is not None else (8 if _tok else 4)
     res = {"status": None, "username": None, "profile_url": None, "github_score": None, "risk_level": None,
            "flags": [], "verified_signals": [], "repos": [], "skills": {"confirmed": [], "unconfirmed": []},
            "llm": {"used": False, "model": None}, "warnings": [], "api_calls": 0}
@@ -274,6 +276,10 @@ def _compact(result, keep_info=False, include_repos=True):
         label = _repo_label(f.get("repo"), user)
         if label:
             item["repo"] = label
+        if f.get("commit"):
+            item["commit"] = f["commit"]
+        if f.get("url"):
+            item["url"] = f["url"]
         if f.get("evidence") and f["id"] not in _GENERIC_EVIDENCE:
             item["evidence"] = f["evidence"]
         flags.append(item)
@@ -306,7 +312,7 @@ def _compact(result, keep_info=False, include_repos=True):
     }
 
 def analyze_github(extracted_data, resume_name=None, resume_email=None, claimed_years=None,
-                   token=None, llm_fn=None, max_repos=4, max_api_calls=None, client=None, now=None,
+                   token=None, llm_fn=None, max_repos=None, max_api_calls=None, client=None, now=None,
                    keep_info=False, include_repos=True):
     full = _analyze_github_full(extracted_data, resume_name=resume_name, resume_email=resume_email,
                                 claimed_years=claimed_years, token=token, llm_fn=llm_fn, max_repos=max_repos,
@@ -320,13 +326,16 @@ def report_lines(result):
     if st == "not_found":
         return [f"GitHub: profile '{result['username']}' does not exist; confirm the link with the candidate."]
     lines = []
-    if result["github_score"] is not None:
+    if result.get("github_score") is not None:
         n_repos = result.get("repo_count", len(result["repos"]))
-        lines.append(f"GitHub score {result['github_score']}/100, risk level: {result['risk_level']} "
+        lines.append(f"GitHub score {result['github_score']}/100, risk level: {result.get('risk_level', 'review')} "
                      f"({n_repos} repo(s) analysed{', partial' if st == 'partial' else ''}).")
     for f in sorted(result["flags"], key=lambda x: ["high", "medium", "low", "info"].index(x["severity"])):
-        where = f" [{f['repo']}]" if f.get("repo") else ""
-        lines.append(f"{f['severity'].upper()}: {f['message']}{where}")
+        where = f" [{f['repo']}]" if f.get("repo") and f.get("repo") not in f.get("message", "") else ""
+        if where and (f.get("url") or re.search(r"https?://\S+$", f.get("message", ""))):
+            lines.append(f"{f['severity'].upper()}: {f['message']}")
+        else:
+            lines.append(f"{f['severity'].upper()}: {f['message']}{where}")
     for v in result["verified_signals"]:
         if isinstance(v, str):
             lines.append("Positive: " + v)

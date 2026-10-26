@@ -2,8 +2,8 @@ import re
 from datetime import datetime
 from .gh_config import FLAG_CATALOG
 
-def _flag(fid, message, scope="repo", repo=None, evidence=None, severity=None):
-    return {
+def _flag(fid, message, scope="repo", repo=None, evidence=None, severity=None, commit=None, url=None):
+    flag_dict = {
         "id": fid,
         "severity": severity or FLAG_CATALOG[fid][0],
         "scope": scope,
@@ -11,6 +11,11 @@ def _flag(fid, message, scope="repo", repo=None, evidence=None, severity=None):
         "message": message,
         "evidence": evidence,
     }
+    if commit:
+        flag_dict["commit"] = commit
+    if url:
+        flag_dict["url"] = url
+    return flag_dict
 
 def _parse_dt(s):
     if not s:
