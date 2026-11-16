@@ -9,16 +9,22 @@ import {
   Sparkles,
   RefreshCw,
   AlertTriangle,
+  Check,
   CheckCircle2,
   XCircle,
   Loader2,
   Info,
   ShieldAlert,
+  ShieldCheck,
+  ExternalLink,
+  GitFork,
+  Code2,
   Mail,
   Phone,
   Globe,
   GraduationCap,
   Briefcase,
+  Calendar,
 } from "lucide-react";
 
 function GithubIcon(props: React.SVGProps<SVGSVGElement>) {
@@ -135,13 +141,99 @@ function ScoreGauge({
   );
 }
 
+function parseContactDetail(raw: string) {
+  const isBirthdayGlyph = raw.includes("\uf1fd");
+  const isPhoneGlyph = raw.includes("\uf095");
+  const isEmailGlyph = raw.includes("\uf0e0");
+  const isGitHubGlyph = raw.includes("\uf09b");
+
+  const cleaned = raw.replace(/[\uE000-\uF8FF]/g, "").trim();
+  let href: string | null = null;
+  let label = cleaned;
+
+  // Extract trailing URL in parentheses like (tel:...), (mailto:...), (https://...)
+  const linkInParens = cleaned.match(/\(((?:mailto|tel|https?):.*)\)$/i);
+  if (linkInParens) {
+    href = linkInParens[1].trim();
+    label = cleaned.replace(/\s*\(((?:mailto|tel|https?):.*)\)$/i, "").trim();
+  }
+
+  // Handle email
+  const emailMatch = label.match(/[\w.+-]+@[\w-]+\.[\w.-]+/);
+  if (!href && (emailMatch || isEmailGlyph)) {
+    if (emailMatch) {
+      href = `mailto:${emailMatch[0]}`;
+      label = emailMatch[0];
+    }
+  } else if (href && href.startsWith("mailto:")) {
+    const cleanEmail = href.replace(/^mailto:/i, "").trim();
+    if (cleanEmail) label = cleanEmail;
+  }
+
+  // Date check (e.g. DD-MM-YYYY, YYYY-MM-DD or birthday icon)
+  const isDate = /^\d{1,4}[-/.]\d{1,2}[-/.]\d{2,4}$/.test(label) || isBirthdayGlyph;
+
+  // Handle tel
+  const telMatch = label.match(/(?:\+?\d[\d\s\-\(\)]{7,}\d)/);
+  if (href && href.startsWith("tel:")) {
+    const cleanDigits = href.replace(/^tel:/i, "").replace(/[^\d+]/g, "");
+    href = `tel:${cleanDigits}`;
+    if (!label || label.startsWith("tel:")) {
+      label = telMatch ? telMatch[0].trim() : cleanDigits;
+    }
+  } else if (
+    !href &&
+    !isDate &&
+    telMatch &&
+    (isPhoneGlyph ||
+      cleaned.toLowerCase().includes("tel") ||
+      cleaned.toLowerCase().includes("phone") ||
+      cleaned.toLowerCase().includes("mob") ||
+      cleaned.startsWith("+") ||
+      cleaned.startsWith("("))
+  ) {
+    const cleanDigits = telMatch[0].replace(/[^\d+]/g, "");
+    href = `tel:${cleanDigits}`;
+    label = telMatch[0].trim();
+  }
+
+  // Handle GitHub & URLs
+  if (href && href.includes("github.com/")) {
+    const ghUser = href.match(/github\.com\/([A-Za-z0-9_-]+)/)?.[1];
+    if (ghUser) label = `@${ghUser}`;
+  } else if (!href && (isGitHubGlyph || raw.includes("") || raw.toLowerCase().includes("github.com"))) {
+    const ghUser =
+      label.match(/github\.com\/([A-Za-z0-9_-]+)/)?.[1] ||
+      label.replace(/github[:\s]*/i, "").trim().split(/\s+/)[0];
+    if (ghUser && /^[A-Za-z0-9_-]+$/.test(ghUser)) {
+      href = `https://github.com/${ghUser}`;
+      label = `@${ghUser}`;
+    }
+  } else if (!href) {
+    const urlMatch = label.match(/https?:\/\/[^\s]+/);
+    if (urlMatch) {
+      href = urlMatch[0];
+      label = label.replace(urlMatch[0], "").trim() || urlMatch[0];
+    }
+  }
+
+  label = label.replace(/^[\s\u2022\-\:\.]+|[\s\u2022\-\:\.]+$/g, "").trim();
+
+  const isEmail = !!(href && href.startsWith("mailto:"));
+  const isPhone = !!(href && href.startsWith("tel:"));
+  const isGitHub = !!(href && href.includes("github.com"));
+  const isLink = !!(href && !isEmail && !isPhone && !isGitHub);
+
+  return { label, href, isEmail, isPhone, isGitHub, isLink, isDate };
+}
+
 function ReviewDashboard() {
   const searchParams = useSearchParams();
   const reviewIdParam = searchParams.get("reviewId");
 
   const [file, setFile] = useState<File | null>(null);
   const [cachedFileName, setCachedFileName] = useState("");
-  const [jobTitle, setJobTitle] = useState("");
+  const [jobTitle, setJobTitle] = useState("Software Engineer");
   const [isDragging, setIsDragging] = useState(false);
   const [loading, setLoading] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -190,7 +282,10 @@ function ReviewDashboard() {
   }, [loading]);
 
   const validateAndSetFile = (selectedFile: File) => {
-    if (!selectedFile.name.toLowerCase().endsWith(".pdf") && selectedFile.type !== "application/pdf") {
+    const isPdf =
+      selectedFile.name.toLowerCase().endsWith(".pdf") ||
+      selectedFile.type === "application/pdf";
+    if (!isPdf) {
       toast.error("Please select a valid PDF file");
       return;
     }
@@ -227,11 +322,13 @@ function ReviewDashboard() {
         fileInputRef.current?.click();
         return;
       }
-      toast.error("Please upload a resume PDF");
+      toast.error("Please select a resume PDF first");
+      fileInputRef.current?.click();
       return;
     }
     if (!jobTitle.trim()) {
       toast.error("Please enter or select a target job title");
+      document.getElementById("job-title-input")?.focus();
       return;
     }
 
@@ -345,72 +442,84 @@ function ReviewDashboard() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          {/* Drag & Drop Zone */}
-          <div
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-            onClick={() => fileInputRef.current?.click()}
-            className={cn(
-              "border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all",
-              isDragging
-                ? "border-primary bg-primary/5 scale-[1.01]"
-                : "border-muted-foreground/25 hover:border-muted-foreground/50 hover:bg-muted/30",
-              (file || cachedFileName) && "border-primary/50 bg-primary/5"
-            )}
-          >
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".pdf,application/pdf"
-              className="hidden"
-              onChange={(e) => {
-                if (e.target.files && e.target.files[0]) {
-                  validateAndSetFile(e.target.files[0]);
-                }
-              }}
-            />
-
-            {file || cachedFileName ? (
-              <div className="flex items-center justify-between max-w-md mx-auto p-3 rounded-lg border bg-background shadow-xs">
-                <div className="flex items-center gap-3 truncate">
-                  <div className="p-2 rounded-md bg-primary/10 text-primary">
+          {/* If file is selected, show file preview card */}
+          {file || cachedFileName ? (
+            <div className="border-2 border-primary/50 bg-primary/5 rounded-xl p-8 text-center transition-all">
+              <div className="flex items-center justify-between max-w-md mx-auto p-3.5 rounded-lg border bg-background shadow-xs">
+                <div className="flex items-center gap-3 truncate mr-2">
+                  <div className="p-2.5 rounded-md bg-primary/10 text-primary shrink-0">
                     <FileText className="h-6 w-6" />
                   </div>
                   <div className="text-left truncate">
-                    <p className="text-sm font-semibold truncate">{file ? file.name : cachedFileName}</p>
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-sm font-semibold truncate text-foreground">
+                      {file ? file.name : cachedFileName}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
                       {file ? `${(file.size / 1024).toFixed(1)} KB • PDF` : "Saved PDF Resume"}
                     </p>
                   </div>
                 </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setFile(null);
-                    setCachedFileName("");
-                  }}
-                  title="Remove file"
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              </div>
-            ) : (
-              <div className="flex flex-col items-center gap-2">
-                <div className="p-3 rounded-full bg-muted text-muted-foreground">
-                  <UploadCloud className="h-8 w-8" />
+                <div className="flex items-center gap-2 shrink-0">
+                  <label htmlFor="resume-file-input" className="cursor-pointer">
+                    <span className="inline-flex items-center justify-center h-8 px-3 rounded-md border border-input bg-background hover:bg-muted text-xs font-semibold shadow-xs transition-colors">
+                      Change
+                    </span>
+                  </label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                    onClick={() => {
+                      setFile(null);
+                      setCachedFileName("");
+                    }}
+                    title="Remove file"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
                 </div>
-                <div className="text-sm font-medium">
-                  <span className="text-primary hover:underline">Click to upload</span> or drag and drop
-                </div>
-                <p className="text-xs text-muted-foreground">PDF resumes up to 5 MB</p>
               </div>
-            )}
-          </div>
+            </div>
+          ) : (
+            /* If no file, show drag-and-drop label */
+            <label
+              htmlFor="resume-file-input"
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              className={cn(
+                "flex flex-col items-center justify-center border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all select-none",
+                isDragging
+                  ? "border-primary bg-primary/5 scale-[1.01]"
+                  : "border-muted-foreground/25 hover:border-primary/50 hover:bg-muted/30"
+              )}
+            >
+              <div className="p-3.5 rounded-full bg-primary/10 text-primary mb-3">
+                <UploadCloud className="h-8 w-8" />
+              </div>
+              <span className="inline-flex items-center justify-center h-9 px-4 rounded-md bg-primary text-primary-foreground text-xs font-semibold shadow-xs hover:bg-primary/90 transition-colors">
+                Select Resume PDF
+              </span>
+              <p className="text-xs text-muted-foreground mt-2">
+                or drag and drop your PDF here (up to 5 MB)
+              </p>
+            </label>
+          )}
+
+          {/* Hidden File Input */}
+          <input
+            id="resume-file-input"
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf,application/pdf"
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files && e.target.files[0]) {
+                validateAndSetFile(e.target.files[0]);
+              }
+            }}
+          />
 
           {/* Job Title Input & Quick Suggestions */}
           <div className="flex flex-col gap-2">
@@ -451,9 +560,10 @@ function ReviewDashboard() {
           <div className="flex items-center gap-4 pt-2">
             <Button
               type="button"
-              disabled={(!file && !cachedFileName) || !jobTitle.trim() || loading}
+              disabled={loading}
               onClick={() => executeReview(false)}
               className="gap-2 px-6"
+              size="lg"
             >
               {loading ? (
                 <>
@@ -541,19 +651,44 @@ function ReviewDashboard() {
                 (reviewResult.result?.personal_details && reviewResult.result.personal_details.length > 0)) && (
                 <div className="flex flex-wrap gap-2 pt-1 border-t border-border/40">
                   {((reviewResult.result?.candidate_info?.personal_details || reviewResult.result?.personal_details || []) as string[]).map((detail: string, idx: number) => {
-                    const isEmail = detail.includes("@");
-                    const isPhone = detail.includes("+") || /\d{5,}/.test(detail);
-                    const isLink = detail.includes("http") || detail.includes("github") || detail.includes("linkedin");
+                    const parsed = parseContactDetail(detail);
+                    if (!parsed.label) return null;
+
+                    const icon = (
+                      <>
+                        {parsed.isEmail && <Mail className="h-3.5 w-3.5 text-primary shrink-0" />}
+                        {parsed.isPhone && <Phone className="h-3.5 w-3.5 text-primary shrink-0" />}
+                        {parsed.isGitHub && <GithubIcon className="h-3.5 w-3.5 text-primary shrink-0" />}
+                        {parsed.isDate && <Calendar className="h-3.5 w-3.5 text-primary shrink-0" />}
+                        {parsed.isLink && <Globe className="h-3.5 w-3.5 text-primary shrink-0" />}
+                      </>
+                    );
+
+                    if (parsed.href) {
+                      return (
+                        <a
+                          key={idx}
+                          href={parsed.href}
+                          target={parsed.isGitHub || parsed.isLink ? "_blank" : undefined}
+                          rel={parsed.isGitHub || parsed.isLink ? "noopener noreferrer" : undefined}
+                          className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-muted/60 hover:bg-muted text-xs text-foreground/90 hover:text-foreground border border-border/50 hover:border-primary/40 transition-colors cursor-pointer group"
+                        >
+                          {icon}
+                          <span className="font-medium">{parsed.label}</span>
+                          {(parsed.isGitHub || parsed.isLink) && (
+                            <ExternalLink className="h-3 w-3 opacity-60 group-hover:opacity-100 ml-0.5 shrink-0 transition-opacity" />
+                          )}
+                        </a>
+                      );
+                    }
 
                     return (
                       <div
                         key={idx}
                         className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-muted/60 text-xs text-foreground/90 border border-border/50"
                       >
-                        {isEmail && <Mail className="h-3.5 w-3.5 text-primary shrink-0" />}
-                        {isPhone && <Phone className="h-3.5 w-3.5 text-primary shrink-0" />}
-                        {isLink && <Globe className="h-3.5 w-3.5 text-primary shrink-0" />}
-                        <span>{detail}</span>
+                        {icon}
+                        <span>{parsed.label}</span>
                       </div>
                     );
                   })}
@@ -728,48 +863,378 @@ function ReviewDashboard() {
             </CardContent>
           </Card>
 
-          {/* GitHub Flags */}
-          <Card className="border-border/60">
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <GithubIcon className="h-5 w-5" />
-                <CardTitle className="text-base font-semibold">GitHub Profile Analysis</CardTitle>
-              </div>
-              <CardDescription>
-                Automated flags extracted from public repository signals and profile checks
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {reviewResult.result?.github_flags && reviewResult.result.github_flags.length > 0 ? (
-                reviewResult.result.github_flags.map((flag, idx) => {
-                  const isHigh = flag.toUpperCase().includes("[HIGH]");
-                  const isMedium = flag.toUpperCase().includes("[MEDIUM]");
+          {/* GitHub Code & Profile Audit */}
+          {(() => {
+            const audit = reviewResult.result?.github_audit;
+            const status = audit?.status;
+            const username = audit?.username || (
+              typeof reviewResult.result?.candidate_info?.personal_details?.find((p) => p.includes("github.com/")) === "string"
+                ? reviewResult.result.candidate_info.personal_details.find((p) => p.includes("github.com/"))?.match(/github\.com\/([A-Za-z0-9_-]+)/)?.[1]
+                : undefined
+            );
+            const profileUrl = audit?.profile_url || (username ? `https://github.com/${username}` : undefined);
+            const githubScore = audit?.github_score ?? reviewResult.result?.github_score;
+            const riskLevel = audit?.risk_level;
+            const auditFlags = audit?.flags || [];
+            const legacyFlags = reviewResult.result?.github_flags || [];
+            const verifiedSignals = audit?.verified_signals || [];
+            const repos = audit?.repos || [];
+            const skills = audit?.skills;
+            const warnings = audit?.warnings || [];
 
-                  return (
-                    <Alert
-                      key={idx}
-                      className={cn(
-                        "py-2.5",
-                        isHigh && "border-rose-500/40 bg-rose-500/10 text-rose-800 dark:text-rose-300",
-                        isMedium && "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300",
-                        !isHigh && !isMedium && "border-blue-500/40 bg-blue-500/10 text-blue-800 dark:text-blue-300"
+            const isNotProvided = status === "not_provided" || (!username && auditFlags.length === 0 && legacyFlags.length === 0);
+            const isNotFound = status === "not_found";
+
+            return (
+              <Card className="border-border/60 shadow-xs">
+                <CardHeader>
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className="p-2 rounded-md bg-muted text-foreground">
+                        <GithubIcon className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <CardTitle className="text-base font-semibold">GitHub Code &amp; Profile Audit</CardTitle>
+                          {username && profileUrl && (
+                            <a
+                              href={profileUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-xs font-mono text-primary hover:underline"
+                            >
+                              <span>@{username}</span>
+                              <ExternalLink className="h-3 w-3" />
+                            </a>
+                          )}
+                        </div>
+                        <CardDescription className="text-xs">
+                          {isNotProvided
+                            ? "Candidate code verification status"
+                            : "Automated analysis of repository ownership, commit authenticity, and coding history"}
+                        </CardDescription>
+                      </div>
+                    </div>
+
+                    {/* Status & Risk Badges */}
+                    <div className="flex items-center flex-wrap gap-2">
+                      {isNotProvided ? (
+                        <Badge variant="outline" className="text-muted-foreground border-border text-xs">
+                          No GitHub Link Provided
+                        </Badge>
+                      ) : isNotFound ? (
+                        <Badge variant="destructive" className="text-xs">
+                          Profile Not Found
+                        </Badge>
+                      ) : (
+                        <>
+                          {riskLevel && (
+                            <Badge
+                              className={cn(
+                                "text-xs font-semibold uppercase tracking-wider",
+                                riskLevel === "low" && "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30",
+                                (riskLevel === "review" || riskLevel === "medium") && "bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30",
+                                riskLevel === "high" && "bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-500/30"
+                              )}
+                            >
+                              {riskLevel === "review" ? "Review Advised" : `${riskLevel} Risk`}
+                            </Badge>
+                          )}
+                          {githubScore !== undefined && githubScore !== null && (
+                            <Badge variant="outline" className="text-xs font-mono font-medium">
+                              Score: <span className="font-bold text-foreground ml-1">{githubScore}/100</span>
+                            </Badge>
+                          )}
+                        </>
                       )}
-                    >
-                      <ShieldAlert className="h-4 w-4" />
+                    </div>
+                  </div>
+                </CardHeader>
+
+                <CardContent className="space-y-4">
+                  {isNotProvided ? (
+                    <div className="flex items-start gap-3 p-3.5 rounded-lg bg-muted/40 border border-border/50 text-xs text-muted-foreground">
+                      <Info className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                      <div>
+                        <p className="font-medium text-foreground">No GitHub Profile Linked</p>
+                        <p className="mt-0.5">
+                          No public GitHub profile link was detected in the resume text. Code verification, commit authenticity, and repository checks were skipped without penalty.
+                        </p>
+                      </div>
+                    </div>
+                  ) : isNotFound ? (
+                    <Alert className="border-rose-500/40 bg-rose-500/10 text-rose-800 dark:text-rose-300">
+                      <AlertTriangle className="h-4 w-4" />
                       <AlertDescription className="text-xs font-medium">
-                        {flag}
+                        The linked profile <strong>@{username}</strong> was not found on GitHub. Please check for typos in the candidate&apos;s resume link.
                       </AlertDescription>
                     </Alert>
-                  );
-                })
-              ) : (
-                <div className="flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400 font-medium">
-                  <CheckCircle2 className="h-4 w-4" />
-                  <span>No GitHub flags or risks detected for this candidate.</span>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                  ) : (
+                    <>
+                      {/* Flags Section */}
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                            <ShieldAlert className="h-3.5 w-3.5" />
+                            <span>Audit Flags {auditFlags.length > 0 ? `(${auditFlags.length})` : ""}</span>
+                          </h4>
+                        </div>
+
+                        {auditFlags.length > 0 ? (
+                          <div className="space-y-2">
+                            {auditFlags.map((flag, idx) => {
+                              const sev = (flag.severity || "info").toLowerCase();
+                              const flagUrl =
+                                flag.url ||
+                                flag.message.match(/https?:\/\/[^\s]+/)?.[0] ||
+                                (flag.repo && username ? `https://github.com/${username}/${flag.repo}` : null);
+                              const cleanedMessage = flag.message
+                                .replace(/:\s*https?:\/\/[^\s]+/g, "")
+                                .replace(/https?:\/\/[^\s]+/g, "")
+                                .trim()
+                                .replace(/:\s*$/, "");
+
+                              return (
+                                <div
+                                  key={idx}
+                                  className={cn(
+                                    "p-3 rounded-lg border text-xs space-y-1.5 transition-colors",
+                                    sev === "high" && "border-rose-500/40 bg-rose-500/10 text-rose-900 dark:text-rose-200",
+                                    sev === "medium" && "border-amber-500/40 bg-amber-500/10 text-amber-900 dark:text-amber-200",
+                                    sev === "low" && "border-yellow-500/40 bg-yellow-500/10 text-yellow-900 dark:text-yellow-200",
+                                    sev === "info" && "border-blue-500/40 bg-blue-500/10 text-blue-900 dark:text-blue-200"
+                                  )}
+                                >
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span
+                                      className={cn(
+                                        "px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider",
+                                        sev === "high" && "bg-rose-500 text-white",
+                                        sev === "medium" && "bg-amber-500 text-white",
+                                        sev === "low" && "bg-yellow-600 dark:bg-yellow-500 text-white",
+                                        sev === "info" && "bg-blue-500 text-white"
+                                      )}
+                                    >
+                                      {sev}
+                                    </span>
+                                    {flag.repo && (
+                                      flagUrl ? (
+                                        <a
+                                          href={flagUrl}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="font-mono font-semibold px-2 py-0.5 rounded bg-background/80 hover:bg-background border border-current/25 hover:border-current/50 text-[11px] flex items-center gap-1.5 transition-colors cursor-pointer hover:underline"
+                                          title={`Open ${flag.url?.includes("/commit/") ? "commit" : "repository"} on GitHub`}
+                                        >
+                                          <GitFork className="h-3 w-3 shrink-0" />
+                                          <span>{flag.repo}</span>
+                                          <ExternalLink className="h-2.5 w-2.5 opacity-70 shrink-0" />
+                                        </a>
+                                      ) : (
+                                        <span className="font-mono font-semibold px-2 py-0.5 rounded bg-background/60 border border-current/20 text-[11px] flex items-center gap-1">
+                                          <GitFork className="h-3 w-3 shrink-0" />
+                                          <span>{flag.repo}</span>
+                                        </span>
+                                      )
+                                    )}
+                                    <span className="font-medium flex-1">{cleanedMessage}</span>
+                                  </div>
+                                  {flag.evidence && (
+                                    <p className="text-[11px] opacity-85 pl-1 font-mono">
+                                      Evidence: {flag.evidence}
+                                    </p>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : legacyFlags.length > 0 ? (
+                          <div className="space-y-2">
+                            {legacyFlags.map((flagStr, idx) => {
+                              const isHigh = flagStr.toUpperCase().includes("[HIGH]");
+                              const isMedium = flagStr.toUpperCase().includes("[MEDIUM]");
+                              const urlMatch = flagStr.match(/https?:\/\/[^\s]+/);
+                              const flagUrl = urlMatch ? urlMatch[0] : null;
+                              const cleaned = flagStr
+                                .replace(/:\s*https?:\/\/[^\s]+/g, "")
+                                .replace(/https?:\/\/[^\s]+/g, "")
+                                .trim()
+                                .replace(/:\s*$/, "");
+
+                              return (
+                                <Alert
+                                  key={idx}
+                                  className={cn(
+                                    "py-2.5",
+                                    isHigh && "border-rose-500/40 bg-rose-500/10 text-rose-800 dark:text-rose-300",
+                                    isMedium && "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300",
+                                    !isHigh && !isMedium && "border-blue-500/40 bg-blue-500/10 text-blue-800 dark:text-blue-300"
+                                  )}
+                                >
+                                  <ShieldAlert className="h-4 w-4" />
+                                  <AlertDescription className="text-xs font-medium flex items-center justify-between gap-2 flex-wrap w-full">
+                                    <span>{cleaned}</span>
+                                    {flagUrl && (
+                                      <a
+                                        href={flagUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-1 font-mono text-[11px] underline opacity-85 hover:opacity-100 shrink-0"
+                                      >
+                                        <span>View commit</span>
+                                        <ExternalLink className="h-3 w-3" />
+                                      </a>
+                                    )}
+                                  </AlertDescription>
+                                </Alert>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-xs text-emerald-700 dark:text-emerald-300 font-medium">
+                            <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                            <span>Clean code history: No suspicious commit dumps, license mismatches, or repository flags detected.</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Positive Verified Signals */}
+                      {verifiedSignals.length > 0 && (
+                        <div className="space-y-2 pt-2 border-t border-border/40">
+                          <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                            <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
+                            <span>Verified Developer Signals ({verifiedSignals.length})</span>
+                          </h4>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {verifiedSignals.map((signal, idx) => (
+                              <div
+                                key={idx}
+                                className="flex items-start gap-2 p-2.5 rounded-lg bg-emerald-500/5 border border-emerald-500/20 text-xs text-foreground/90"
+                              >
+                                <Check className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400 font-bold shrink-0 mt-0.5" />
+                                <span className="leading-snug">{signal.replace(/^Positive:\s*/, "")}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Language Verification */}
+                      {skills && ((skills.confirmed && skills.confirmed.length > 0) || (skills.unconfirmed && skills.unconfirmed.length > 0)) ? (
+                        <div className="space-y-2 pt-2 border-t border-border/40">
+                          <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                            <Code2 className="h-3.5 w-3.5" />
+                            <span>Language Verification</span>
+                          </h4>
+                          <div className="flex flex-wrap gap-1.5 items-center">
+                            {skills.confirmed && skills.confirmed.length > 0 && (
+                              <>
+                                <span className="text-[11px] text-muted-foreground mr-1">Confirmed in code:</span>
+                                {skills.confirmed.map((lang, idx) => (
+                                  <Badge
+                                    key={idx}
+                                    variant="secondary"
+                                    className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 text-[11px] px-2 py-0.5 flex items-center gap-1"
+                                  >
+                                    <Check className="h-3 w-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                                    <span>{lang}</span>
+                                  </Badge>
+                                ))}
+                              </>
+                            )}
+                            {skills.unconfirmed && skills.unconfirmed.length > 0 && (
+                              <>
+                                <span className="text-[11px] text-muted-foreground ml-2 mr-1">No repo evidence:</span>
+                                {skills.unconfirmed.map((lang, idx) => (
+                                  <Badge
+                                    key={idx}
+                                    variant="outline"
+                                    className="text-muted-foreground border-border text-[11px] px-2 py-0.5"
+                                  >
+                                    {lang}
+                                  </Badge>
+                                ))}
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {/* Audited Repositories Summary */}
+                      {repos.length > 0 && (
+                        <div className="space-y-2 pt-2 border-t border-border/40">
+                          <div className="flex items-center justify-between">
+                            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                              <GitFork className="h-3.5 w-3.5" />
+                              <span>Audited Repositories ({repos.length})</span>
+                            </h4>
+                            <span className="text-[11px] text-muted-foreground hidden sm:inline">
+                              Authenticity &amp; Code Quality Score
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {repos.map((repo, idx) => {
+                              const authorshipPct = repo.commits ? Math.round(((repo.own_commits || 0) / repo.commits) * 100) : 0;
+                              const repoUrl =
+                                repo.url ||
+                                (username ? `https://github.com/${username}/${repo.name}` : null);
+
+                              return (
+                                <div
+                                  key={idx}
+                                  className="flex items-center justify-between p-2.5 rounded-lg bg-muted/30 border border-border/50 text-xs hover:border-border transition-colors"
+                                >
+                                  <div className="truncate mr-2">
+                                    <div className="font-semibold text-foreground truncate flex items-center gap-1.5">
+                                      <GitFork className="h-3 w-3 text-muted-foreground shrink-0" />
+                                      {repoUrl ? (
+                                        <a
+                                          href={repoUrl}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="truncate hover:underline hover:text-primary flex items-center gap-1"
+                                          title={`Open ${repo.name} on GitHub`}
+                                        >
+                                          <span>{repo.name}</span>
+                                          <ExternalLink className="h-2.5 w-2.5 opacity-60 shrink-0" />
+                                        </a>
+                                      ) : (
+                                        <span className="truncate">{repo.name}</span>
+                                      )}
+                                      {repo.is_fork && (
+                                        <span className="text-[10px] text-muted-foreground uppercase px-1 py-0.5 rounded bg-muted font-normal">(Fork)</span>
+                                      )}
+                                    </div>
+                                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                                      {repo.own_commits ?? 0} / {repo.commits ?? 0} commits ({authorshipPct}% own)
+                                    </p>
+                                  </div>
+                                  <Badge
+                                    variant="outline"
+                                    className="font-mono text-[11px] shrink-0 font-semibold"
+                                    title="Individual repository authenticity and code quality score (0-100) based on commit history, authorship, tests, CI/CD, and documentation"
+                                  >
+                                    Score: {repo.score}/100
+                                  </Badge>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Warnings if any */}
+                      {warnings.length > 0 && (
+                        <div className="pt-2 text-[11px] text-muted-foreground italic">
+                          {warnings.join(" ")}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })()}
         </div>
       )}
     </div>

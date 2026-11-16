@@ -5,6 +5,44 @@ export interface CandidateInfo {
   experience?: string[];
 }
 
+export interface GitHubFlag {
+  id: string;
+  severity: "high" | "medium" | "low" | "info" | string;
+  message: string;
+  repo?: string;
+  evidence?: string;
+  commit?: string;
+  url?: string;
+}
+
+export interface GitHubRepoSummary {
+  name: string;
+  full_name?: string;
+  url?: string;
+  score: number;
+  is_fork: boolean;
+  claimed?: boolean;
+  commits?: number;
+  own_commits?: number;
+}
+
+export interface GitHubAudit {
+  status?: "analyzed" | "ok" | "partial" | "not_provided" | "not_found" | string;
+  username?: string | null;
+  profile_url?: string | null;
+  github_score?: number | null;
+  risk_level?: "low" | "review" | "medium" | "high" | string;
+  repo_count?: number;
+  flags?: GitHubFlag[];
+  verified_signals?: string[];
+  repos?: GitHubRepoSummary[];
+  skills?: {
+    confirmed?: string[];
+    unconfirmed?: string[];
+  };
+  warnings?: string[];
+}
+
 export interface PipelineResult {
   candidate_name?: string;
   candidate_info?: CandidateInfo;
@@ -13,6 +51,8 @@ export interface PipelineResult {
   experience?: string[];
   score: number;
   ats_score: number;
+  github_score?: number | null;
+  github_audit?: GitHubAudit;
   matched_skills: string[];
   missing_skills: string[];
   weaknesses: string[];
