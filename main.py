@@ -136,15 +136,34 @@ def run_pipeline(
     ))
     skill_match_score = compute_skill_match_score(all_candidate_skills, required_skills)
 
+    # Extract candidate basic info
+    personal_details = parsed_data.get("personal_details", [])
+    candidate_name = "Candidate"
+    if personal_details and len(personal_details) > 0:
+        for item in personal_details:
+            cleaned = re.sub(r"[^\w\s]", "", item).strip()
+            if cleaned and not any(k in item.lower() for k in ["@", "http", "phone", "tel:", "www.", "github.com", "linkedin.com", "(+", "+"]):
+                candidate_name = cleaned
+                break
+        if candidate_name == "Candidate":
+            candidate_name = personal_details[0].strip()
+
     # Module 3: GitHub Code Audit
-    has_token=bool(os.environ.get("GITHUB_TOKEN"))
-    github_result = analyze_github(parsed_data, max_repos=8  if has_token else 4)
+    has_token = bool(os.environ.get("GITHUB_TOKEN"))
+    resume_email = next((m.group(0) for p in personal_details
+                         if (m := re.search(r"[\w.+-]+@[\w-]+\.[\w.-]+", p))), None)
+    github_result = analyze_github(
+        parsed_data,
+        resume_name=candidate_name if candidate_name != "Candidate" else None,
+        resume_email=resume_email,
+        max_repos=8 if has_token else 4,
+    )
     github_score = github_result.get("github_score")
     github_flags = github_result.get("flags", [])
 
     print(f"      - ATS Score: {ats_score}/100")
     print(f"      - Skill Match: {len(matching_skills)} matched, {len(missing_skills)} missing ({skill_match_score*100:.1f}%)")
-    print(f"      - GitHub Audit: Score {github_score or 'N/A'}, {len(github_flags)} flags")
+    print(f"      - GitHub Audit: Score {github_score if github_score is not None else 'N/A'}, {len(github_flags)} flags")
 
     # Module 4: Convergence - AI Inference Evaluation
     print("[2/4] Running AI convergence evaluation...")
@@ -163,7 +182,7 @@ def run_pipeline(
     final_score = compute_final_score(
         ats_score=ats_score,
         skill_match_score=skill_match_score,
-        github_score=github_score or 0.0
+        github_score=github_score
     )
 
     weaknesses = generate_weaknesses(
@@ -172,18 +191,6 @@ def run_pipeline(
         model_reason=inference_output["reason"],
         model_weaknesses=inference_output.get("weaknesses", [])
     )
-
-    # Extract candidate basic info
-    personal_details = parsed_data.get("personal_details", [])
-    candidate_name = "Candidate"
-    if personal_details and len(personal_details) > 0:
-        for item in personal_details:
-            cleaned = re.sub(r"[^\w\s]", "", item).strip()
-            if cleaned and not any(k in item.lower() for k in ["@", "http", "phone", "tel:", "www.", "github.com", "linkedin.com", "(+", "+"]):
-                candidate_name = cleaned
-                break
-        if candidate_name == "Candidate":
-            candidate_name = personal_details[0].strip()
 
     candidate_info = {
         "name": candidate_name,
@@ -205,12 +212,12 @@ def run_pipeline(
         "weaknesses": weaknesses,
         "github_flags": [
             (
-                f"[{f.get('severity', '').upper()}] {f.get('message')}"
+                f"[{f.get('severity', '').upper()}]{' [' + f['repo'] + ']' if f.get('repo') else ''} {f.get('message')}"
                 if (f.get("url") and f["url"] in f.get("message", "")) or not f.get("url")
-                else f"[{f.get('severity', '').upper()}] {f.get('message', '').rstrip('.')}: {f['url']}"
+                else f"[{f.get('severity', '').upper()}]{' [' + f['repo'] + ']' if f.get('repo') else ''} {f.get('message', '').rstrip('.')}: {f['url']}"
             )
             for f in github_flags
-            if f.get("severity") in ("high", "medium")
+            if f.get("severity") in ("high", "medium", "low")
         ]
     }
 

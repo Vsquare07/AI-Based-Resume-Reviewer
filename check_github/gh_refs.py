@@ -28,6 +28,19 @@ def extract_github_refs(extracted_data):
             else:
                 profiles.append((owner, field))
 
+        # Detect FontAwesome/NerdFont glyphs (, ) or 'github: <username>'
+        for m in re.finditer(r'(?:[]|(?:^|\s)github[:\s])\s*([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))(?:/([A-Za-z0-9._-]+))?', text, re.I):
+            owner, name = m.group(1), m.group(2)
+            if owner.lower() in _RESERVED:
+                continue
+            if name:
+                name = name.rstrip('.')
+                if name.lower().endswith('.git'):
+                    name = name[:-4]
+                repos.append((owner, name))
+            else:
+                profiles.append((owner, field))
+
     username = None
     pd_profiles = [o for o, f in profiles if f == "personal_details"]
     if pd_profiles:

@@ -16,10 +16,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import or_, text
 from sqlalchemy.orm import Session
 
-# Add repository root to Python path so we can import the pipeline modules
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+# Ensure API directory and repo root are in Python path
+API_DIR = Path(__file__).resolve().parent
+if str(API_DIR) not in sys.path:
+    sys.path.insert(0, str(API_DIR))
+
+REPO_ROOT = API_DIR.parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+
+# Load .env file from repository root
+from dotenv import load_dotenv
+load_dotenv(REPO_ROOT / ".env")
 
 # Load pipeline entrypoint explicitly from repo root main.py using importlib
 # to avoid naming collision with this file (frontend/api/main.py)
