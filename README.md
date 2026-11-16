@@ -1,10 +1,10 @@
-#AI-Based-Resume-Reviewer
-##Requirements
+# AI-Based-Resume-Reviewer
+## Requirements
 - NodeJS(npm)
 - Python
 - ollama
 
-##Setup
+## Setup
 Set the ollama model you wan't to use in `.env` and install it
 ```sh
 ollama pull {your_model}
@@ -22,7 +22,7 @@ cd frontend/web
 npm install
 ```
 
-##Run
+## Run
 ```sh
 #Start the Ollama service
 ollama serve
